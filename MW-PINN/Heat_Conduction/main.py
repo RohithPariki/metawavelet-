@@ -20,7 +20,7 @@ wpinn_model = WPINN(input_size=n_collocation,
                     hidden_neurons=50, 
                     family_size=len_family).to(device)
 
-optimizer1 = optim.Adam(list(wpinn_model.parameters()) + list(evaluator.basis.parameters()), lr=1e-4)
+optimizer1 = optim.AdamW(list(wpinn_model.parameters()) + list(evaluator.basis.parameters()), lr=1e-4, weight_decay=1e-4)
 
 def wpinn_loss(c, b):
     u, u_t, u_xx, u_pred_ic, u_pred_bcl, u_pred_bcr = evaluator.evaluate(c, b)
@@ -74,17 +74,13 @@ for param in evaluator.basis.parameters():
 
 print("\nFinal Meta-Wavelet Coefficients (a_n):", evaluator.basis.a_n.data.cpu().numpy())
 
-# Phase 2: Refine Coefficients
+# Phase 2: L-BFGS Coefficient Refinement
 with torch.no_grad():
     c_final, b_final = wpinn_model(x_collocation, t_collocation)
 
 refinement_model = CoefficientRefinementNetwork(initial_coefficients=c_final, initial_bias=b_final).to(device)
-optimizer2 = optim.Adam(refinement_model.parameters(), lr=1e-3)
 
-c_end, b_end = train_phase(refinement_model, optimizer2, num_epochs=10001, phase_name="Phase 2 (Coeff Refinement)")
-
-# Phase 3: L-BFGS Refinement to handle extreme spikes
-print("\n--- Starting Phase 3 (L-BFGS Refinement) ---")
+print("\n--- Starting Phase 2 (L-BFGS Coefficient Refinement) ---")
 start_time = time.time()
 optimizer_lbfgs = optim.LBFGS(refinement_model.parameters(), max_iter=5000, tolerance_grad=1e-7, tolerance_change=1e-9, history_size=50)
 
@@ -96,7 +92,7 @@ def closure():
     return loss
 
 optimizer_lbfgs.step(closure)
-print(f"Phase 3 (L-BFGS) completed in {(time.time() - start_time)/60:.1f} minutes.")
+print(f"Phase 2 (L-BFGS) completed in {(time.time() - start_time)/60:.1f} minutes.")
 
 with torch.no_grad():
     c_end, b_end = refinement_model(x_collocation, t_collocation)

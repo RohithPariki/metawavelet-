@@ -51,7 +51,7 @@ evaluator = WaveletEvaluator(N_H=2)
 wpinn_model1 = WPINN(input_size=n_collocation, num_hidden_layers1=2, num_hidden_layers2=4, hidden_neurons=50, family_size=len_family).to(device)
 wpinn_model2 = WPINN(input_size=n_collocation, num_hidden_layers1=2, num_hidden_layers2=4, hidden_neurons=50, family_size=len_family).to(device)
 
-optimizer1 = optim.Adam(list(wpinn_model1.parameters()) + list(wpinn_model2.parameters()) + list(evaluator.basis.parameters()), lr=1e-4)
+optimizer1 = optim.AdamW(list(wpinn_model1.parameters()) + list(wpinn_model2.parameters()) + list(evaluator.basis.parameters()), lr=1e-4, weight_decay=1e-4)
 
 def wpinn_loss(c1, b1, c2, b2):
     c_E1, c_H1 = c1
@@ -143,6 +143,7 @@ for param in evaluator.basis.parameters():
 
 print("\nFinal Meta-Wavelet Coefficients (a_n):", evaluator.basis.a_n.data.cpu().numpy())
 
+# Phase 2: L-BFGS Coefficient Refinement
 with torch.no_grad():
     c1_final, b1_final = wpinn_model1(x_collocation1, t_collocation)
     c2_final, b2_final = wpinn_model2(x_collocation2, t_collocation)
@@ -150,9 +151,32 @@ with torch.no_grad():
 ref_model1 = CoefficientRefinementNetwork(initial_coefficients=c1_final, initial_bias=b1_final).to(device)
 ref_model2 = CoefficientRefinementNetwork(initial_coefficients=c2_final, initial_bias=b2_final).to(device)
 
-optimizer2 = optim.Adam(list(ref_model1.parameters()) + list(ref_model2.parameters()), lr=1e-3)
+print("\n--- Starting Phase 2 (L-BFGS Coefficient Refinement) ---")
+start_time = time.time()
+optimizer_lbfgs = optim.LBFGS(
+    list(ref_model1.parameters()) + list(ref_model2.parameters()),
+    max_iter=5000, tolerance_grad=1e-7, tolerance_change=1e-9, history_size=50
+)
 
-c1_end, b1_end, c2_end, b2_end = train_phase(ref_model1, ref_model2, optimizer2, num_epochs=10001, phase_name="Phase 2 (Coeff Refinement)")
+def closure():
+    optimizer_lbfgs.zero_grad()
+    c1_bfgs, b1_bfgs = ref_model1(x_collocation1, t_collocation)
+    c2_bfgs, b2_bfgs = ref_model2(x_collocation2, t_collocation)
+    loss, pde_loss, ic_loss, bc_loss, int_loss = wpinn_loss(c1_bfgs, b1_bfgs, c2_bfgs, b2_bfgs)
+    loss.backward()
+    return loss
+
+optimizer_lbfgs.step(closure)
+print(f"Phase 2 (L-BFGS) completed in {(time.time() - start_time)/60:.1f} minutes.")
+
+with torch.no_grad():
+    c1_end, b1_end = ref_model1(x_collocation1, t_collocation)
+    c2_end, b2_end = ref_model2(x_collocation2, t_collocation)
+    E_val1 = evaluator.evaluate_val(c1_end[0], b1_end[0], is_subdomain2=False)
+    E_val2 = evaluator.evaluate_val(c2_end[0], b2_end[0], is_subdomain2=True)
+    E_val = torch.cat((E_val1, E_val2))
+    errL2 = torch.norm(E_validation - E_val) / torch.norm(E_validation)
+    print(f'L-BFGS Final | RelL2: {errL2.item():.6f}')
 
 import matplotlib.pyplot as plt
 

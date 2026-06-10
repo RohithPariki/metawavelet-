@@ -19,7 +19,7 @@ wpinn_model = WPINN(input_size=len_collocation,
                     hidden_neurons1=50, 
                     hidden_neurons2=50).to(device)
 
-optimizer1 = optim.Adam(list(wpinn_model.parameters()) + list(evaluator.basis.parameters()), lr=1e-4)
+optimizer1 = optim.AdamW(list(wpinn_model.parameters()) + list(evaluator.basis.parameters()), lr=1e-4, weight_decay=1e-4)
 
 def wpinn_loss(coeffs, biases):
     c_u, c_v, c_p = coeffs
@@ -89,6 +89,7 @@ for param in evaluator.basis.parameters():
 
 print("\nFinal Meta-Wavelet Coefficients (a_n):", evaluator.basis.a_n.data.cpu().numpy())
 
+# Phase 2: L-BFGS Coefficient Refinement
 with torch.no_grad():
     c_final, b_final = wpinn_model(x_collocation, y_collocation)
 
@@ -97,9 +98,27 @@ refinement_model = CoefficientRefinementNetwork(
     b_u=b_final[0], b_v=b_final[1], b_p=b_final[2]
 ).to(device)
 
-optimizer2 = optim.Adam(refinement_model.parameters(), lr=1e-3)
+print("\n--- Starting Phase 2 (L-BFGS Coefficient Refinement) ---")
+start_time = time.time()
+optimizer_lbfgs = optim.LBFGS(refinement_model.parameters(), max_iter=5000, tolerance_grad=1e-7, tolerance_change=1e-9, history_size=50)
 
-c_end, b_end = train_phase(refinement_model, optimizer2, num_epochs=10001, phase_name="Phase 2 (Coeff Refinement)")
+def closure():
+    optimizer_lbfgs.zero_grad()
+    coeffs_bfgs, biases_bfgs = refinement_model(x_collocation, y_collocation)
+    loss, pde_loss, bc_loss = wpinn_loss(coeffs_bfgs, biases_bfgs)
+    loss.backward()
+    return loss
+
+optimizer_lbfgs.step(closure)
+print(f"Phase 2 (L-BFGS) completed in {(time.time() - start_time)/60:.1f} minutes.")
+
+with torch.no_grad():
+    c_end, b_end = refinement_model(x_collocation, y_collocation)
+    u_test = evaluator.evaluate_test(c_end[0], b_end[0])
+    v_test = evaluator.evaluate_test(c_end[1], b_end[1])
+    pred_vel = torch.sqrt(u_test**2 + v_test**2).reshape(n_test, n_test)
+    errL2 = torch.norm(vel_ref - pred_vel) / torch.norm(vel_ref)
+    print(f'L-BFGS Final | RelL2: {errL2.item():.6f}')
 
 import matplotlib.pyplot as plt
 
