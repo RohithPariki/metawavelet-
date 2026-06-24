@@ -9,9 +9,14 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.gridspec as gridspec
 import os
+import sys
 
-ARTIFACTS_DIR = '/Users/jaipreethtiruvaipati/.gemini/antigravity-ide/brain/1c913928-9b2d-4225-8f79-fa9f08acf95e'
-SAVE_DIR      = '/Users/jaipreethtiruvaipati/Desktop/wavelet/meta_wavelet_pinn/paper/figures'
+# Fix for printing unicode characters (e.g. checkmarks) to Windows console
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
+
+ARTIFACTS_DIR = r'C:\Users\parik\.gemini\antigravity-ide\brain\9f5f5555-1975-44c1-a26a-7b23308c83f6'
+SAVE_DIR      = r'c:\Users\parik\Downloads\colloquium\code\new\WaveletNeuralNetworks\meta_wavelet_pinn\paper\figures'
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 def save(fig, name):

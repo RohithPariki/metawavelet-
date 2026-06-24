@@ -17,6 +17,9 @@ import time
 import sys
 import os
 
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 from core.hermite_family import HermiteGaussianFamily
